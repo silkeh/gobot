@@ -181,8 +181,8 @@ type WifiData struct {
 type Driver struct {
 	name           string
 	reqAddr        string
-	cmdConn        io.WriteCloser // UDP connection to send/receive drone commands
-	videoConn      *net.UDPConn   // UDP connection for drone video
+	cmdConn        io.ReadWriteCloser // UDP connection to send/receive drone commands
+	videoConn      *net.UDPConn       // UDP connection for drone video
 	respPort       string
 	videoPort      string
 	cmdMutex       sync.Mutex
