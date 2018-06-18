@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -101,9 +100,12 @@ const (
 
 // The 8-bit message types
 const (
-	queryType = 0x48
-	setType = 0x68
-	ackType = 0x50
+	queryType  = 0x48
+	setType    = 0x68
+	ackType    = 0x50
+	frameType  = 0x60
+	configType = 0x88
+	flipType   = 0x70
 )
 
 // FlipType is used for the various flips supported by the Tello.
@@ -158,6 +160,17 @@ const (
 	VideoBitRate4M VideoBitRate = 5
 )
 
+// ImageMode is used to switch between Photo and Video mode
+type ImageMode int
+
+const (
+	// PictureMode sets the drone to picture mode
+	PictureMode ImageMode = 0
+
+	// VideoMode sets the drone to video mode
+	VideoMode ImageMode = 1
+)
+
 // WifiData packet returned by the Tello
 type WifiData struct {
 	Disturb  int8
@@ -173,7 +186,7 @@ type Driver struct {
 	respPort       string
 	videoPort      string
 	cmdMutex       sync.Mutex
-	seq            int16
+	seq            uint16
 	rx, ry, lx, ly float32
 	throttle       int
 	bouncing       bool
@@ -282,70 +295,32 @@ func (d *Driver) Halt() (err error) {
 
 // TakeOff tells drones to liftoff and start flying.
 func (d *Driver) TakeOff() (err error) {
-	buf, _ := d.createPacket(takeoffCommand, 0x68, 0)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(takeoffCommand, setType)
 }
 
 // Throw & Go support
 func (d *Driver) ThrowTakeOff() (err error) {
-	buf, _ := d.createPacket(throwtakeoffCommand, 0x48, 0)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(throwtakeoffCommand, queryType)
 }
 
 // Land tells drone to come in for landing.
 func (d *Driver) Land() (err error) {
-	buf, _ := d.createPacket(landCommand, 0x68, 1)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, byte(0x00))
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(landCommand, setType, byte(0))
 }
 
 // StopLanding tells drone to stop landing.
 func (d *Driver) StopLanding() (err error) {
-	buf, _ := d.createPacket(landCommand, 0x68, 1)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, byte(0x01))
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(landCommand, setType, byte(1))
 }
 
 // PalmLand tells drone to come in for a hand landing.
 func (d *Driver) PalmLand() (err error) {
-	buf, _ := d.createPacket(palmLandCommand, 0x68, 1)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, byte(0x00))
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(palmLandCommand, setType, byte(0))
 }
 
 // StartVideo tells Tello to send start info (SPS/PPS) for video stream.
 func (d *Driver) StartVideo() (err error) {
-	buf, _ := d.createPacket(videoStartCommand, 0x60, 0)
-	binary.Write(buf, binary.LittleEndian, int16(0x00)) // seq = 0
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(videoStartCommand, frameType)
 }
 
 // SetExposure sets the drone camera exposure level. Valid levels are 0, 1, and 2.
@@ -354,26 +329,12 @@ func (d *Driver) SetExposure(level int) (err error) {
 		return errors.New("Invalid exposure level")
 	}
 
-	buf, _ := d.createPacket(exposureCommand, 0x48, 1)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, byte(level))
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(exposureCommand, setType, byte(level))
 }
 
 // SetVideoEncoderRate sets the drone video encoder rate.
 func (d *Driver) SetVideoEncoderRate(rate VideoBitRate) (err error) {
-	buf, _ := d.createPacket(videoEncoderRateCommand, 0x68, 1)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, byte(rate))
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(videoEncoderRateCommand, setType, byte(rate))
 }
 
 // SetFastMode sets the drone throttle to 1.
@@ -396,13 +357,7 @@ func (d *Driver) SetSlowMode() error {
 
 // Rate queries the current video bit rate.
 func (d *Driver) Rate() (err error) {
-	buf, _ := d.createPacket(videoRateQuery, 0x48, 0)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(videoRateQuery, queryType)
 }
 
 // bound is a naive implementation that returns the smaller of x or y.
@@ -596,30 +551,22 @@ func (d *Driver) CeaseRotation() {
 
 // Bounce tells drone to start/stop performing the bouncing action
 func (d *Driver) Bounce() (err error) {
-	buf, _ := d.createPacket(bounceCommand, 0x68, 1)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
+	pkt := d.nextPacket(bounceCommand, setType)
+
 	if d.bouncing {
-		binary.Write(buf, binary.LittleEndian, byte(0x31))
+		pkt.Write(byte(0x31))
 	} else {
-		binary.Write(buf, binary.LittleEndian, byte(0x30))
+		pkt.Write(byte(0x30))
 	}
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-	_, err = d.cmdConn.Write(buf.Bytes())
+
+	_, err = d.cmdConn.Write(pkt.Bytes())
 	d.bouncing = !d.bouncing
 	return
 }
 
 // Flip tells drone to flip
 func (d *Driver) Flip(direction FlipType) (err error) {
-	buf, _ := d.createPacket(flipCommand, 0x70, 1)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
-	binary.Write(buf, binary.LittleEndian, byte(direction))
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
-	return
+	return d.sendPacket(flipCommand, flipType, byte(direction))
 }
 
 // FrontFlip tells the drone to perform a front flip.
@@ -647,8 +594,8 @@ func (d *Driver) SendStickCommand() (err error) {
 	d.cmdMutex.Lock()
 	defer d.cmdMutex.Unlock()
 
-	buf, _ := d.createPacket(stickCommand, 0x60, 11)
-	binary.Write(buf, binary.LittleEndian, int16(0x00)) // seq = 0
+	// New packet with seq = 0
+	pkt := NewPacketBuffer(stickCommand, frameType, 0)
 
 	// RightX center=1024 left =364 right =-364
 	axis1 := int16(660.0*d.rx + 1024.0)
@@ -666,23 +613,21 @@ func (d *Driver) SendStickCommand() (err error) {
 	axis5 := int16(d.throttle)
 
 	packedAxis := int64(axis1)&0x7FF | int64(axis2&0x7FF)<<11 | 0x7FF&int64(axis3)<<22 | 0x7FF&int64(axis4)<<33 | int64(axis5)<<44
-	binary.Write(buf, binary.LittleEndian, byte(0xFF&packedAxis))
-	binary.Write(buf, binary.LittleEndian, byte(packedAxis>>8&0xFF))
-	binary.Write(buf, binary.LittleEndian, byte(packedAxis>>16&0xFF))
-	binary.Write(buf, binary.LittleEndian, byte(packedAxis>>24&0xFF))
-	binary.Write(buf, binary.LittleEndian, byte(packedAxis>>32&0xFF))
-	binary.Write(buf, binary.LittleEndian, byte(packedAxis>>40&0xFF))
+	pkt.Write(byte(0xFF & packedAxis))
+	pkt.Write(byte(packedAxis >> 8 & 0xFF))
+	pkt.Write(byte(packedAxis >> 16 & 0xFF))
+	pkt.Write(byte(packedAxis >> 24 & 0xFF))
+	pkt.Write(byte(packedAxis >> 32 & 0xFF))
+	pkt.Write(byte(packedAxis >> 40 & 0xFF))
 
 	now := time.Now()
-	binary.Write(buf, binary.LittleEndian, byte(now.Hour()))
-	binary.Write(buf, binary.LittleEndian, byte(now.Minute()))
-	binary.Write(buf, binary.LittleEndian, byte(now.Second()))
-	binary.Write(buf, binary.LittleEndian, byte(now.UnixNano()/int64(time.Millisecond)&0xff))
-	binary.Write(buf, binary.LittleEndian, byte(now.UnixNano()/int64(time.Millisecond)>>8))
+	pkt.Write(byte(now.Hour()))
+	pkt.Write(byte(now.Minute()))
+	pkt.Write(byte(now.Second()))
+	pkt.Write(byte(now.UnixNano() / int64(time.Millisecond) & 0xff))
+	pkt.Write(byte(now.UnixNano() / int64(time.Millisecond) >> 8))
 
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(pkt.Bytes())
 
 	return
 }
@@ -692,21 +637,17 @@ func (d *Driver) SendDateTime() (err error) {
 	d.cmdMutex.Lock()
 	defer d.cmdMutex.Unlock()
 
-	buf, _ := d.createPacket(timeCommand, 0x50, 11)
-	d.seq++
-	binary.Write(buf, binary.LittleEndian, d.seq)
+	pkt := d.nextPacket(timeCommand, ackType)
 
 	now := time.Now()
-	binary.Write(buf, binary.LittleEndian, byte(0x00))
-	binary.Write(buf, binary.LittleEndian, int16(now.Hour()))
-	binary.Write(buf, binary.LittleEndian, int16(now.Minute()))
-	binary.Write(buf, binary.LittleEndian, int16(now.Second()))
-	binary.Write(buf, binary.LittleEndian, int16(now.UnixNano()/int64(time.Millisecond)&0xff))
-	binary.Write(buf, binary.LittleEndian, int16(now.UnixNano()/int64(time.Millisecond)>>8))
+	pkt.Write(byte(0x00))
+	pkt.Write(int16(now.Hour()))
+	pkt.Write(int16(now.Minute()))
+	pkt.Write(int16(now.Second()))
+	pkt.Write(int16(now.UnixNano() / int64(time.Millisecond) & 0xff))
+	pkt.Write(int16(now.UnixNano() / int64(time.Millisecond) >> 8))
 
-	binary.Write(buf, binary.LittleEndian, CalculateCRC16(buf.Bytes()))
-
-	_, err = d.cmdConn.Write(buf.Bytes())
+	_, err = d.cmdConn.Write(pkt.Bytes())
 	return
 }
 
@@ -800,23 +741,90 @@ func (d *Driver) processVideo() error {
 	return nil
 }
 
-func (d *Driver) createPacket(cmd int16, pktType byte, len int16) (buf *bytes.Buffer, err error) {
-	l := len + 11
-	buf = &bytes.Buffer{}
-
-	binary.Write(buf, binary.LittleEndian, byte(messageStart))
-	binary.Write(buf, binary.LittleEndian, l<<3)
-	binary.Write(buf, binary.LittleEndian, CalculateCRC8(buf.Bytes()[0:3]))
-	binary.Write(buf, binary.LittleEndian, pktType)
-	binary.Write(buf, binary.LittleEndian, cmd)
-
-	return buf, nil
-}
-
 func (d *Driver) connectionString() string {
 	x, _ := strconv.Atoi(d.videoPort)
 	b := [2]byte{}
 	binary.LittleEndian.PutUint16(b[:], uint16(x))
 	res := fmt.Sprintf("conn_req:%s", b)
 	return res
+}
+
+func (d *Driver) nextPacket(cmd uint16, pktType byte, data ...interface{}) *PacketBuffer {
+	d.seq++
+	return NewPacketBuffer(cmd, pktType, d.seq, data...)
+}
+
+func (d *Driver) sendPacket(cmd uint16, pktType byte, data ...interface{}) (err error) {
+	d.seq++
+	pkt := NewPacket(cmd, pktType, uint16(d.seq), data...)
+	_, err = d.cmdConn.Write(pkt.Encode())
+	return
+}
+
+func (d *Driver) QueryMaxHeight() error {
+	return d.sendPacket(maxHeightMessage, queryType)
+}
+
+func (d *Driver) QueryAttAngle() error {
+	return d.sendPacket(attAngleMessage, queryType)
+}
+
+func (d *Driver) SetMaxHeight(h int16) error {
+	return d.sendPacket(maxHeightCommand, setType, h)
+}
+
+func (d *Driver) SetAttAngle(angle float32) error {
+	return d.sendPacket(attAngleCommand, setType, angle)
+}
+
+func (d *Driver) SetEIS(v int8) error {
+	return d.sendPacket(eisCommand, setType, v)
+}
+
+func (d *Driver) SetJPEGQuality(q int8) error {
+	return d.sendPacket(jpegQualityCommand, setType, q)
+}
+
+func (d *Driver) SetVideoDynamicRate(r int8) error {
+	return d.sendPacket(videoDynRateCommand, setType, r)
+}
+
+func (d *Driver) SetVideoRecord(n int8) error {
+	return d.sendPacket(videoRecordCommand, setType, n)
+}
+
+func (d *Driver) SetImageMode(m ImageMode) error {
+	return d.sendPacket(picVidModeCommand, setType, byte(m))
+}
+
+func (d *Driver) VideoMode() error {
+	return d.SetImageMode(VideoMode)
+}
+
+func (d *Driver) PhotoMode() error {
+	return d.SetImageMode(PictureMode)
+}
+
+func (d *Driver) TakePicture() error {
+	return d.sendPacket(pictureCommand, setType)
+}
+
+func (d *Driver) SendJPEGStartAck() error {
+	return d.sendPacket(jpegStartMessage, ackType, byte(0))
+}
+
+func (d *Driver) SendJPEGPartAck(endFlag byte, fileID uint16, pieceID uint32) error {
+	return d.sendPacket(jpegMessage, ackType, endFlag, fileID, pieceID)
+}
+
+func (d *Driver) SendJPEGEndAck(fileID uint16, size int32) error {
+	return d.sendPacket(jpegEndMessage, queryType, fileID, size)
+}
+
+func (d *Driver) SendLogAck(id uint16) error {
+	return d.sendPacket(logMessage, ackType, byte(0), id)
+}
+
+func (d *Driver) SendLogConfigAck(id uint16, n2 int32) error {
+	return d.sendPacket(logConfigMessage, configType, byte(0), id, n2)
 }
