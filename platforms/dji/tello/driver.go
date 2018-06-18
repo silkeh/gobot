@@ -43,6 +43,9 @@ const (
 	// LogEvent event
 	LogEvent = "log"
 
+	// LogDataEvent event
+	LogDataEvent = "logdata"
+
 	// WifiDataEvent event
 	WifiDataEvent = "wifidata"
 
@@ -61,15 +64,24 @@ const (
 
 // the 16-bit messages and commands stored in bytes 6 & 5 of the packet
 const (
-	messageStart   = 0x00cc // 204
-	wifiMessage    = 0x001a // 26
-	videoRateQuery = 0x0028 // 40
-	lightMessage   = 0x0035 // 53
-	flightMessage  = 0x0056 // 86
-	logMessage     = 0x1050 // 4176
+	messageStart     = 0x00cc // 204
+	wifiMessage      = 0x001a // 26
+	videoRateQuery   = 0x0028 // 40
+	lightMessage     = 0x0035 // 53
+	flightMessage    = 0x0056 // 86
+	jpegStartMessage = 0x0062 // 98
+	jpegMessage      = 0x0063 // 99
+	jpegEndMessage   = 0x0064 // 100
+	logMessage       = 0x1050 // 4176
+	logDataMessage   = 0x1051 // 4177
+	logConfigMessage = 0x1052 // 4178
+	maxHeightMessage = 0x1056 // 4182
+	attAngleMessage  = 0x1059 // 4185
 
 	videoEncoderRateCommand = 0x0020 // 32
+	videoDynRateCommand     = 0x0021 // 33
 	videoStartCommand       = 0x0025 // 37
+	videoRecordCommand      = 0x0032 // 50
 	exposureCommand         = 0x0034 // 52
 	timeCommand             = 0x0046 // 70
 	stickCommand            = 0x0050 // 80
@@ -79,6 +91,19 @@ const (
 	throwtakeoffCommand     = 0x005d // 93
 	palmLandCommand         = 0x005e // 94
 	bounceCommand           = 0x1053 // 4179
+	maxHeightCommand        = 0x0058 // 88
+	attAngleCommand         = 0x1058 // 4184
+	eisCommand              = 0x0024 // 36
+	pictureCommand          = 0x0030 // 48
+	picVidModeCommand       = 0x0031 // 49
+	jpegQualityCommand      = 0x0037 // 55
+)
+
+// The 8-bit message types
+const (
+	queryType = 0x48
+	setType = 0x68
+	ackType = 0x50
 )
 
 // FlipType is used for the various flips supported by the Tello.
