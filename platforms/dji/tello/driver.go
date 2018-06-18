@@ -701,6 +701,9 @@ func (d *Driver) handleResponse(r io.Reader) error {
 			d.Publish(d.Event(SetExposureEvent), buf[7:8])
 		case videoEncoderRateCommand:
 			d.Publish(d.Event(SetVideoEncoderRateEvent), buf[7:8])
+		case logDataMessage:
+			ld, _ := ParseLogData(buf[10:])
+			d.Publish(d.Event(LogDataEvent), ld)
 		default:
 			fmt.Printf("Unknown message: %+v\n", buf[0:n])
 		}
